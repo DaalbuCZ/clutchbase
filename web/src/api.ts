@@ -1,5 +1,6 @@
 export type Host = {
   id: string;
+  machineId: string;
   name: string;
   address: string;
   port: number;
@@ -16,7 +17,16 @@ export type Host = {
   online: boolean;
 };
 
-export type Workspace = { capturedAt: string; hosts: Host[]; maps: string[] };
+export type Machine = {
+  id: string;
+  name: string;
+  address: string;
+  driver: string;
+  online: boolean;
+  lastSeen: string | null;
+  createServer: boolean;
+};
+export type Workspace = { capturedAt: string; hosts: Host[]; maps: string[]; machines: Machine[] };
 
 export class APIError extends Error {
   constructor(

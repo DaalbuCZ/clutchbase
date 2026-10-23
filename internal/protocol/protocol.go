@@ -15,6 +15,7 @@ func ValidMap(name string) bool {
 
 type Host struct {
 	ID            string     `json:"id"`
+	MachineID     string     `json:"machineId"`
 	Name          string     `json:"name"`
 	Address       string     `json:"address"`
 	Port          int        `json:"port"`
@@ -38,9 +39,41 @@ type Actions struct {
 }
 
 type Workspace struct {
-	CapturedAt string   `json:"capturedAt"`
-	Hosts      []Host   `json:"hosts"`
-	Maps       []string `json:"maps"`
+	CapturedAt string    `json:"capturedAt"`
+	Hosts      []Host    `json:"hosts"`
+	Maps       []string  `json:"maps"`
+	Machines   []Machine `json:"machines"`
+}
+
+const MaxServers = 64
+
+type Machine struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Address      string     `json:"address"`
+	Driver       string     `json:"driver"`
+	LastSeen     *time.Time `json:"lastSeen"`
+	Online       bool       `json:"online"`
+	CreateServer bool       `json:"createServer"`
+}
+
+type ServerReport struct {
+	ID string `json:"id"`
+	Report
+}
+
+type ServerDesired struct {
+	ID string `json:"id"`
+	Desired
+}
+
+type MachineReport struct {
+	Driver  string         `json:"driver"`
+	Servers []ServerReport `json:"servers"`
+}
+
+type MachineDesired struct {
+	Servers []ServerDesired `json:"servers"`
 }
 
 // Project is the single lifecycle/action policy used by reads and mutations.
@@ -52,11 +85,15 @@ func (h *Host) Project(now time.Time) {
 		return
 	}
 	h.Actions.Stop = h.DesiredState == "running"
-	h.Actions.Start = h.DesiredState == "stopped" && (h.ObservedState == "stopped" || h.ObservedState == "error")
-	h.Actions.ChangeMap = h.DesiredState == "stopped" && h.ObservedState == "stopped"
+	h.Actions.Start = h.DesiredState == "stopped" && (h.ObservedState == "stopped" || h.ObservedState == "error" || h.ObservedState == "uninstalled")
+	h.Actions.ChangeMap = h.DesiredState == "stopped" && (h.ObservedState == "stopped" || h.ObservedState == "uninstalled")
 	switch {
 	case h.Error != "" || h.ObservedState == "error":
 		h.Status = "error"
+	case h.ObservedState == "installing" && h.DesiredState == "running":
+		h.Status = "installing"
+	case h.ObservedState == "uninstalled" && h.DesiredState == "stopped":
+		h.Status = "uninstalled"
 	case h.DesiredState == "running" && h.ObservedState != "running":
 		h.Status = "starting"
 	case h.DesiredState == "stopped" && h.ObservedState != "stopped":
@@ -69,6 +106,7 @@ func (h *Host) Project(now time.Time) {
 type Desired struct {
 	State string `json:"state"`
 	Map   string `json:"map"`
+	Port  int    `json:"port"`
 }
 
 type Report struct {

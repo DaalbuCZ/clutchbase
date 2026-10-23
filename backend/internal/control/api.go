@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,15 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql
-var schema string
-
 type API struct {
 	DB         *pgxpool.Pool
 	AdminToken string
 }
-
-func (a *API) Migrate(ctx context.Context) error { _, err := a.DB.Exec(ctx, schema); return err }
 
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -45,6 +39,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/hosts", a.admin(a.create))
 	mux.HandleFunc("PATCH /api/hosts/{id}", a.admin(a.update))
 	mux.HandleFunc("POST /api/agent/{id}/heartbeat", a.heartbeat)
+	mux.HandleFunc("POST /api/machines", a.admin(a.createMachine))
+	mux.HandleFunc("POST /api/machines/{id}/servers", a.admin(a.createServer))
+	mux.HandleFunc("POST /api/machine-agent/{id}/heartbeat", a.machineHeartbeat)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "API endpoint not found") })
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -76,7 +73,10 @@ func (a *API) admin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	return decodeLimit(w, r, v, 8192)
+}
+func decodeLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
@@ -104,11 +104,11 @@ func internal(w http.ResponseWriter, err error) {
 	fail(w, 500, "Database operation failed")
 }
 
-const columns = "id, name, address, port, map, desired_state, observed_state, active_map, driver, error, last_seen, revision"
+const columns = "id, name, address, port, map, desired_state, observed_state, active_map, driver, error, last_seen, revision, COALESCE(machine_id,'')"
 
 func scan(row pgx.Row) (protocol.Host, error) {
 	var h protocol.Host
-	err := row.Scan(&h.ID, &h.Name, &h.Address, &h.Port, &h.Map, &h.DesiredState, &h.ObservedState, &h.ActiveMap, &h.Driver, &h.Error, &h.LastSeen, &h.Revision)
+	err := row.Scan(&h.ID, &h.Name, &h.Address, &h.Port, &h.Map, &h.DesiredState, &h.ObservedState, &h.ActiveMap, &h.Driver, &h.Error, &h.LastSeen, &h.Revision, &h.MachineID)
 	h.Project(time.Now())
 	return h, err
 }
@@ -133,7 +133,13 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 		internal(w, err)
 		return
 	}
-	respond(w, 200, protocol.Workspace{CapturedAt: capturedAt.Format("2006-01-02T15:04:05.000000000Z"), Hosts: hosts, Maps: protocol.Maps})
+	rows.Close()
+	machines, err := a.machines(r.Context())
+	if err != nil {
+		internal(w, err)
+		return
+	}
+	respond(w, 200, protocol.Workspace{CapturedAt: capturedAt.Format("2006-01-02T15:04:05.000000000Z"), Hosts: hosts, Maps: protocol.Maps, Machines: machines})
 }
 
 var hostname = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$`)
@@ -238,7 +244,7 @@ func (a *API) update(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 	var hash string
-	err := a.DB.QueryRow(r.Context(), "SELECT token_hash FROM hosts WHERE id=$1", r.PathValue("id")).Scan(&hash)
+	err := a.DB.QueryRow(r.Context(), "SELECT token_hash FROM hosts WHERE id=$1 AND machine_id IS NULL", r.PathValue("id")).Scan(&hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 401, "Invalid agent credentials")
 		return
@@ -255,12 +261,12 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if (in.State != "running" && in.State != "stopped" && in.State != "error" && in.State != "starting" && in.State != "stopping") || (in.Driver != "simulated" && in.Driver != "systemd") || (in.ActiveMap != "" && !protocol.ValidMap(in.ActiveMap)) || len(in.Error) > 1000 {
+	if !validReport(in) {
 		fail(w, 400, "Invalid agent status")
 		return
 	}
 	var desired protocol.Desired
-	err = a.DB.QueryRow(r.Context(), "UPDATE hosts SET observed_state=$2,active_map=$3,driver=$4,error=$5,last_seen=now() WHERE id=$1 RETURNING desired_state,map", r.PathValue("id"), in.State, in.ActiveMap, in.Driver, in.Error).Scan(&desired.State, &desired.Map)
+	err = a.DB.QueryRow(r.Context(), "UPDATE hosts SET observed_state=$2,active_map=$3,driver=$4,error=$5,last_seen=now() WHERE id=$1 RETURNING desired_state,map,port", r.PathValue("id"), in.State, in.ActiveMap, in.Driver, in.Error).Scan(&desired.State, &desired.Map, &desired.Port)
 	if err != nil {
 		internal(w, err)
 		return

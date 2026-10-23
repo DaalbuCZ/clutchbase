@@ -4,6 +4,7 @@ build:
 	mkdir -p bin
 	go build -buildvcs=false -trimpath -o bin/clutchbase-api ./backend/cmd/api
 	go build -buildvcs=false -trimpath -o bin/clutchbase-agent ./agent/cmd/agent
+	go build -buildvcs=false -trimpath -o bin/clutchbase-host ./agent/cmd/host
 
 test:
 	go test -race ./...

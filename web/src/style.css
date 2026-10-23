@@ -611,7 +611,7 @@ select:disabled {
   .page-heading h1 {
     font-size: 32px;
   }
-  .page-heading > .primary {
+  .heading-actions > button {
     font-size: 10px;
     padding: 10px;
     min-height: 35px;
@@ -664,7 +664,23 @@ select:disabled {
   .sidebar {
     gap: 10px;
   }
-  .page-heading > .primary {
+  .heading-actions > button {
     margin-top: 0;
   }
 }
+
+.heading-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.machine-list { margin-bottom: 24px; border: 1px solid #2a332b; border-radius: 10px; }
+.machine-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 14px 18px; }
+.machine-row + .machine-row { border-top: 1px solid #2a332b; }
+.machine-row strong { margin-right: 12px; }
+
+@media (max-width: 700px) {
+  .page-heading { flex-wrap: wrap; }
+  .heading-actions { width: 100%; gap: 8px; }
+  .heading-actions > button { margin-top: 0; }
+}
+.join-access { margin: 0 0 18px; }
+.join-access summary { cursor: pointer; color: #a8b1a5; }
+.join-access p { margin: 12px 0 0; }
+.join-access pre { font-size: 11px; }

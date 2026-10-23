@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { APIError, connection, request } from "./api";
-import type { Host, Workspace } from "./api";
+import type { Host, Machine, Workspace } from "./api";
 
 function Mark() {
   return (
@@ -25,17 +25,18 @@ export function App() {
   session.current = token;
   const hosts = snapshot?.hosts || [];
   const maps = snapshot?.maps || [];
+  const machines = snapshot?.machines || [];
   const accept = (next: Workspace) =>
     setSnapshot((previous) =>
       !previous || next.capturedAt >= previous.capturedAt ? next : previous,
     );
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<"machine" | "server" | null>(null);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [credentials, setCredentials] = useState<{
-    host: Host;
+    machine: Machine;
     agentToken: string;
   } | null>(null);
 
@@ -45,7 +46,7 @@ export function App() {
     setToken("");
     setSnapshot(null);
     setCredentials(null);
-    setAdding(false);
+    setAdding(null);
   }
   async function refresh() {
     const next = await request<Workspace>(token, "/state");
@@ -123,32 +124,47 @@ export function App() {
       );
     }
   }
-  async function addHost(event: FormEvent<HTMLFormElement>) {
+  async function addMachine(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setBusy("create");
     setError("");
     try {
-      const result = await request<{ host: Host; agentToken: string }>(
+      const result = await request<{ machine: Machine; agentToken: string }>(
         token,
-        "/hosts",
+        "/machines",
         {
           method: "POST",
           body: JSON.stringify({
             name: form.get("name"),
             address: form.get("address"),
-            port: Number(form.get("port")),
           }),
         },
       );
       setCredentials(result);
-      setAdding(false);
+      setAdding(null);
       await refresh();
     } catch (err) {
       setError(message(err));
     } finally {
       setBusy("");
     }
+  }
+
+  async function addServer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy("create");
+    setError("");
+    try {
+      await request<Host>(token, `/machines/${form.get("machine")}/servers`, {
+        method: "POST",
+        body: JSON.stringify({ name: form.get("name"), map: form.get("map"), port: Number(form.get("port")) }),
+      });
+      setAdding(null);
+      await refresh();
+    } catch (err) { setError(message(err)); }
+    finally { setBusy(""); }
   }
 
   if (!token)
@@ -203,7 +219,7 @@ export function App() {
     (h) => h.online && h.observedState === "running",
   ).length;
   const agentCommand = credentials
-    ? `CLUTCHBASE_API_URL='${import.meta.env.DEV ? "http://127.0.0.1:8080" : window.location.origin}' \\\nCLUTCHBASE_HOST_ID='${credentials.host.id}' \\\nCLUTCHBASE_AGENT_TOKEN='${credentials.agentToken}' \\\n./bin/clutchbase-agent --simulate`
+    ? `CLUTCHBASE_API_URL='${import.meta.env.DEV ? "http://127.0.0.1:8080" : window.location.origin}' \\\nCLUTCHBASE_MACHINE_ID='${credentials.machine.id}' \\\nCLUTCHBASE_AGENT_TOKEN='${credentials.agentToken}' \\\n./bin/clutchbase-agent --machine`
     : "";
 
   return (
@@ -228,13 +244,14 @@ export function App() {
             <div>
               <h1>Servers</h1>
             </div>
-            <button className="primary" onClick={() => setAdding(true)}>
-              ＋ Register host
-            </button>
+            <div className="heading-actions">
+              <button className="secondary" disabled={loading || !!error} onClick={() => setAdding("machine")}>Connect machine</button>
+              <button className="primary" disabled={loading || !!error || !machines.some((m) => m.createServer)} onClick={() => setAdding("server")}>＋ Create server</button>
+            </div>
           </div>
           <div className="stats">
             <div>
-              <span className="stat-label">Hosts</span>
+              <span className="stat-label">Servers</span>
               <strong>{hosts.length.toString().padStart(2, "0")}</strong>
             </div>
             <div>
@@ -247,9 +264,7 @@ export function App() {
             <div>
               <span className="stat-label">Agents online</span>
               <strong>
-                {hosts
-                  .filter((h) => h.online)
-                  .length.toString()
+                {(machines.filter((m) => m.online).length + hosts.filter((h) => !h.machineId && h.online).length).toString()
                   .padStart(2, "0")}
               </strong>
             </div>
@@ -257,6 +272,16 @@ export function App() {
           {error && (
             <div className="error banner" role="alert">
               {error}
+            </div>
+          )}
+          {machines.length > 0 && (
+            <div className="machine-list">
+              {machines.map((m) => (
+                <div className="machine-row" key={m.id}>
+                  <div><strong>{m.name}</strong> <span className="muted">{m.address}</span></div>
+                  <span className="small muted">{m.online ? (m.driver === "simulated" ? "Simulated agent connected" : "Agent connected") : m.lastSeen ? "Agent disconnected" : "Waiting for agent"}</span>
+                </div>
+              ))}
             </div>
           )}
           {loading ? (
@@ -267,10 +292,10 @@ export function App() {
             <div className="empty">
               <div className="empty-icon">＋</div>
               <p className="muted">
-                Register a Linux host and connect its agent to manage a server.
+                {machines.some((m) => m.createServer) ? "Create a server on your connected machine. CS2 installs when you start it." : "Connect a Linux machine once, then create servers here."}
               </p>
-              <button className="primary" onClick={() => setAdding(true)}>
-                Register your first host <span>↗</span>
+              <button className="primary" disabled={!!error} onClick={() => setAdding(machines.some((m) => m.createServer) ? "server" : "machine")}>
+                {machines.some((m) => m.createServer) ? "Create server" : "Connect machine"} <span>↗</span>
               </button>
             </div>
           ) : (
@@ -278,7 +303,9 @@ export function App() {
               {hosts.map((host) => {
                 const state = host.status;
                 const transitioning =
-                  state === "starting" || state === "stopping";
+                  state === "starting" ||
+                  state === "stopping" ||
+                  state === "installing";
                 return (
                   <article className="server-card" key={host.id}>
                     <div className={`map-art ${host.map}`}>
@@ -311,6 +338,14 @@ export function App() {
                           Copy ↗
                         </button>
                       </p>
+                      {host.machineId && host.driver !== "simulated" && (
+                        <details className="join-access">
+                          <summary>Join password</summary>
+                          <p className="small muted">Run on the game machine:</p>
+                          <pre>./bin/clutchbase-host credentials s-{host.id.toLowerCase()}</pre>
+                          <p className="small muted">Use the agent’s --root if you selected a custom storage directory.</p>
+                        </details>
+                      )}
                       <label className="map-label">
                         STARTUP MAP
                         <select
@@ -373,7 +408,9 @@ export function App() {
                               ? "■ Stop server"
                               : state === "stopping"
                                 ? "Stopping…"
-                                : "▶ Start server"}
+                                : state === "uninstalled"
+                                  ? "↓ Install & start"
+                                  : "▶ Start server"}
                         </button>
                       </div>
                     </div>
@@ -393,17 +430,17 @@ export function App() {
         <Dialog
           onClose={() => {
             if (busy !== "create") {
-              setAdding(false);
+              setAdding(null);
               setCredentials(null);
             }
           }}
         >
           {credentials ? (
             <>
-              <h2 id="modal-title">Connect {credentials.host.name}.</h2>
+              <h2 id="modal-title">Connect {credentials.machine.name}</h2>
               <p className="muted">
-                Build the agent, then run this on the same machine as the API to
-                try simulation. The token is shown once. Keep it private.
+                Run this once on your Linux machine, then create servers from this dashboard.
+                The agent token is shown once; keep it private.
               </p>
               <pre>{agentCommand}</pre>
               <button
@@ -413,27 +450,40 @@ export function App() {
                 Copy agent command
               </button>
               <p className="small muted">
-                For a remote host, use your HTTPS API address. For real CS2,
-                replace --simulate with --unit and --config as described in
-                README.md.
+                For a remote host, use your HTTPS API address. Install SteamCMD
+                first. Add --simulate to try the controls without downloading CS2.
+                Each real server needs a full CS2 installation. See README.md for host setup.
               </p>
+            </>
+          ) : adding === "server" ? (
+            <>
+              <h2 id="modal-title">Create server</h2>
+              <p className="muted">Select a machine and startup map. After creation, use Install &amp; start to download and launch CS2.</p>
+              <form onSubmit={(event) => void addServer(event)}>
+                <label>Server name<input autoFocus name="name" required maxLength={80} placeholder="Friday night crew" /></label>
+                <label>Machine<select name="machine" required>{machines.filter((m) => m.createServer).map((m) => <option key={m.id} value={m.id}>{m.name}{m.driver === "simulated" ? " (simulated)" : ""}</option>)}</select></label>
+                <label>Startup map<select name="map" required>{maps.map((m) => <option key={m} value={m}>{mapName(m)}</option>)}</select></label>
+                <label>Game port<input name="port" type="number" min={1024} max={65533} placeholder="Automatic" /></label>
+                <p className="small muted">Leave the port blank to allocate it automatically. The next two ports are reserved for client and TV traffic.</p>
+                {error && <p className="error" role="alert">{error}</p>}
+                <button className="primary" type="submit" disabled={busy === "create" || !machines.some((m) => m.createServer)}>{busy === "create" ? "Creating…" : "Create server →"}</button>
+              </form>
             </>
           ) : (
             <>
-              <h2 id="modal-title">Register a host.</h2>
+              <h2 id="modal-title">Connect machine</h2>
               <p className="muted">
-                Connect an existing Linux host. This registers its server; it
-                does not install CS2.
+                Register a Linux machine, then run its agent. One agent manages all servers you create on it.
               </p>
-              <form onSubmit={(event) => void addHost(event)}>
+              <form onSubmit={(event) => void addMachine(event)}>
                 <label>
-                  Server name
+                  Machine name
                   <input
                     autoFocus
                     name="name"
                     required
                     maxLength={80}
-                    placeholder="Friday night crew"
+                    placeholder="Home server"
                   />
                 </label>
                 <label>
@@ -443,17 +493,6 @@ export function App() {
                     required
                     maxLength={253}
                     placeholder="play.example.com"
-                  />
-                </label>
-                <label>
-                  Game port
-                  <input
-                    name="port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    defaultValue={27015}
-                    required
                   />
                 </label>
                 {error && (
@@ -466,7 +505,7 @@ export function App() {
                   type="submit"
                   disabled={busy === "create"}
                 >
-                  {busy === "create" ? "Registering…" : "Register host →"}
+                  {busy === "create" ? "Registering…" : "Register machine →"}
                 </button>
               </form>
             </>

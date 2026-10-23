@@ -47,7 +47,8 @@ No license for the user's own code has been selected yet.
 1. First control loop: register one host, show status, select an official map,
    start/stop a preinstalled CS2 service, show connection details.
 2. Steam sign-in, groups and permissions; installation/provisioning, additional
-   server instances, passwords, logs and useful startup/readiness checks.
+   server instances, SteamID whitelists (preferred over join passwords), logs and
+   useful startup/readiness checks.
 3. Match/practice presets, Workshop maps, rosters, ready-up, pauses and overtime.
 4. Demo recording/upload, completed matches, scoreboard and basic statistics.
 5. Manual demo imports, then share-code retrieval and authorized automatic
@@ -61,26 +62,29 @@ No license for the user's own code has been selected yet.
 ## Architecture
 
 - `web/`: React/Vite dashboard. Calls the same-origin `/api` endpoints.
-- `backend/`: Go HTTP API, PostgreSQL persistence, embedded initial schema.
-- `agent/`: Go executable making outbound authenticated heartbeats. One locally
-  configured systemd user service per registered host in this first slice.
+- `backend/`: Go HTTP API, PostgreSQL persistence, transactional versioned migrations.
+- `agent/`: outbound Go agent and `clutchbase-host` CLI. Managed mode installs
+  CS2 and generates systemd user services; the existing-service mode remains.
+  Machine mode connects once and controls multiple UI-created instances. Legacy
+  single-instance registrations/agents remain supported separately.
 - `internal/protocol/`: shared map allowlist and agent/API types.
 - PostgreSQL stores desired state and the last observed process state separately.
-- The browser uses an administrator token. Each host gets its own random agent
-  token; only its hash is retained in the database.
-- Agent reports observed state and receives desired state. Hostnames and service
-  commands are never interpreted as shell strings.
+- The browser uses an administrator token. Each machine (or legacy instance)
+  gets its own random agent token; only its hash is retained in the database.
+- Agent reports observed state and receives desired state, map and numeric game
+  port. Paths and executables are configured locally, never sent as shell strings.
 - Offline is derived from heartbeat age. Running means service process running,
   not verified game-query readiness or player counts.
 
 ## First-slice boundaries
 
-No Steam authentication, public/multiuser deployment, CS2 installer, RCON, live
-match plugin, statistics, demos, skins, or highlight renderer yet. The real agent
-controls an existing systemd user service and writes a map config consumed by
-that service. Map changes require a stopped server. Simulation is explicitly
-labeled and does not launch CS2. Keep API/frontend on loopback locally; use HTTPS
-and proper user authentication before exposing to other people.
+No Steam authentication, public/multiuser deployment, cloud VM provisioning,
+shared game installation, RCON, live match plugin, statistics, demos, skins, or
+highlight renderer yet. Managed installs require SteamCMD, OS runtime libraries,
+and a working user systemd session supplied by the operator. Each instance has
+a full isolated install. Map changes require a stopped or uninstalled server.
+Simulation is explicitly labeled and does not launch CS2. Keep API/frontend on
+loopback locally; use HTTPS and proper user authentication before public access.
 
 ## Verified implementation (2026-10-23)
 
@@ -93,9 +97,101 @@ Verified with Go race tests (including a real PostgreSQL 18 integration test),
 `go vet`, a TypeScript/Vite production build, Compose configuration validation,
 and browser registration/map/start/stop checks using the simulated agent. The
 browser showed starting/running/stopping/stopped transitions from API snapshots
-and no console warnings/errors. Real CS2/systemd operation and the Docker image
-build have not been exercised in this environment.
+and no console warnings/errors. At this initial checkpoint, real CS2/systemd
+operation and the Docker image build had not yet been exercised. The later
+remote test below supersedes the CS2/systemd limitation.
 
 Current development preview uses a disposable PostgreSQL cluster under `/tmp`
 and one explicitly simulated host. It is not a production deployment or a real
 game server. Follow README.md to configure durable local credentials/storage.
+
+## Automatic provisioning (2026-10-23)
+
+The user requested an independent CSM-like tool to spin up servers automatically.
+`clutchbase-host` now creates named local instances, installs Steam app 730,
+generates private configs/systemd user units, starts/stops, updates stopped
+instances, lists state, reads install logs, and retrieves join passwords.
+Multiple instances use separate directories and non-overlapping port ranges.
+The tool never invokes sudo or downloads code from Auto-Tournament projects.
+
+`clutchbase-agent --instance NAME` creates a missing local config from the
+registered game port, installs missing CS2 files on Start, and reports
+uninstalled/installing/error/actual service state through the existing snapshot.
+Installation runs in a cancellable background job so heartbeats continue.
+Successful installation alone does not start a game: the latest desired state
+is reconciled afterward. Failed downloads stay unready and can be retried.
+One controller lease prevents local CLI mutations or another agent from fighting
+the dashboard while linked. Secrets stay in host files, not PostgreSQL or logs.
+
+Tests cover isolation, port collisions, private credentials, generated commands,
+service ownership, blocked live updates, cancellation/process-group cleanup,
+retry after partial downloads, controller leases, background provisioning,
+registration/port matching, and authoritative API installation states. Game
+downloads and systemd commands use stand-ins in the automated tests; they are
+now complemented by the real remote smoke test below.
+
+## Real remote verification (2026-10-23)
+
+The user authorized testing over SSH on their Linux host. The actual SteamCMD
+download/validation, cancellation/resume, linked agent/API state, real systemd
+launch/stop, Dust2-to-Mirage map change, local A2S query, idempotent Start, CLI
+ownership lock, live-update rejection, and stopped update/start all passed.
+Existing CSM/CS2 process IDs were preserved. Full details and retained instance
+location are in `docs/REMOTE_TEST.md`. Never store the supplied SSH password.
+
+The test found and fixed quoted WorkingDirectory paths rejected by systemd, and
+game settings needing reapplication after CS2's map-load cvar reset. Installation
+now verifies unit LoadState before marking ready; managed server.cfg reapplies
+settings without map commands. Regression and PostgreSQL tests passed afterward.
+
+Development-machine UDP queries timed out; no firewall was changed. Human player
+connections, password authentication, public GSLT operation, and the Docker
+image build remain unverified. CS2's A2S password flag was false, matching a
+known upstream reporting issue; do not treat that flag as an authentication test.
+The test game/agent were stopped and temporary tunnel/agent credentials removed;
+the approximately 69 GiB isolated installation is retained for reuse.
+
+## UI provisioning and access preference (2026-10-23)
+
+The user requested whitelist-based access instead of passwords and creating new
+servers from the UI, allowing the next step that follows the roadmap. This slice
+implements machine registration plus multiple UI-created instances with one
+outbound machine agent. The user's preferred final access model is a SteamID
+whitelist, not shared join passwords. Passwords remain until a verified game-side
+whitelist enforcement mechanism exists; a database list alone cannot restrict
+CS2 connections.
+
+The UI connects a machine once, shows heartbeat/capability state, and creates
+servers with an official map and automatic or explicit game port. Creation is
+stopped until Install & start; state/actions still come from PostgreSQL and
+observed reports. Reserved three-port ranges are allocated under a machine row
+lock, including concurrent requests. Machines and legacy servers keep separate
+hashed credentials; a machine heartbeat may only report its own instances.
+Failed/omitted reports do not falsely mark another instance ready or online.
+
+The new machine agent derives private local instance names from server IDs,
+keeps a controller lease per instance, reuses cancellable managed installations,
+and reports siblings independently. Global SteamCMD locking serializes downloads.
+A process-wide GSLT is rejected in machine mode because each public instance
+needs its own token. No public fleet onboarding or GSLT management UI is provided.
+Legacy installations are retained, not automatically adopted or duplicated.
+There is no delete/move operation. Up to 64 instances per machine are allowed by
+the protocol; disk, CPU, networking and memory remain operator responsibilities.
+
+Versioned transactional migrations preserve the previous unversioned database,
+including desired state, revisions, map selections and legacy credentials. Tests
+cover upgrades, repeated migration, auth boundaries, transactional rejection of
+foreign reports, concurrent port allocation, independent instance reconciliation,
+installation cancellation, sibling failure recovery, and controller leases.
+Go race tests, vet, real PostgreSQL integration tests and the TypeScript/Vite
+production build pass. Browser checks use a clearly labeled simulated machine;
+this new multi-instance path has not yet been tested against multiple real CS2
+processes. Earlier single-instance remote CS2 verification still applies only to
+the previously tested managed runner.
+
+Next: Steam sign-in/groups and an enforced SteamID allowlist. Original MatchZy
+has documented whitelist support (one SteamID64 per line in whitelist.cfg and
+matchzy_whitelist_enabled_default), but needs Metamod and CounterStrikeSharp.
+Evaluate/pin compatible independently licensed releases, verify loaded plugins
+and allowed/denied real client joins, and fail closed before replacing passwords.
+Reference: https://shobhit-pathak.github.io/MatchZy/configuration/ .
