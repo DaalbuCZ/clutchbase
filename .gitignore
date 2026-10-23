@@ -1,0 +1,7 @@
+.env
+node_modules/
+web/dist/
+bin/
+*.log
+coverage.out
+*.tsbuildinfo

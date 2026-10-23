@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: clutchbase
+      POSTGRES_USER: clutchbase
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clutchbase -d clutchbase"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://clutchbase:${POSTGRES_PASSWORD}@postgres:5432/clutchbase?sslmode=disable
+      CLUTCHBASE_ADMIN_TOKEN: ${CLUTCHBASE_ADMIN_TOKEN:?Set CLUTCHBASE_ADMIN_TOKEN in .env}
+      CLUTCHBASE_LISTEN: :8080
+      CLUTCHBASE_WEB_DIR: /app/web
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  postgres_data:

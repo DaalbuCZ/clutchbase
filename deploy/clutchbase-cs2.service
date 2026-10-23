@@ -1,0 +1,17 @@
+# Copy to ~/.config/systemd/user/clutchbase-cs2.service on the game host.
+# Replace ALL /home/cs2 paths with your actual dedicated server installation.
+[Unit]
+Description=Clutchbase CS2 dedicated server
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/cs2/server
+# The startup map is written by the agent, and consumed by +exec below.
+ExecStart=/home/cs2/server/game/bin/linuxsteamrt64/cs2 -dedicated -console -usercon -port 27015 +game_type 0 +game_mode 1 +exec clutchbase.cfg
+KillSignal=SIGINT
+TimeoutStopSec=20
+Restart=no
+
+[Install]
+WantedBy=default.target
