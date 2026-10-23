@@ -195,3 +195,17 @@ matchzy_whitelist_enabled_default), but needs Metamod and CounterStrikeSharp.
 Evaluate/pin compatible independently licensed releases, verify loaded plugins
 and allowed/denied real client joins, and fail closed before replacing passwords.
 Reference: https://shobhit-pathak.github.io/MatchZy/configuration/ .
+
+## Dependency security update (2026-10-23)
+
+Upgraded pgx from v5.7.6 to v5.9.2 to address the GitHub dependency alerts.
+The updated driver no longer depends on golang.org/x/crypto; go mod tidy removes
+that module and its affected versions from the dependency graph. A follow-up
+Go vulnerability scan identified two x/text issues; x/text is updated to v0.41.0,
+with its required x/sync v0.22.0. The minimum Go version is now 1.25; the existing
+Docker builder uses Go 1.26.
+
+Verified the security-only change in an isolated copy of committed code because
+other application edits were in progress in the shared workspace. Go race tests,
+real PostgreSQL integration tests, vet, frontend type checking/build and all three
+binary builds pass. govulncheck v1.9.0 reports no vulnerabilities.

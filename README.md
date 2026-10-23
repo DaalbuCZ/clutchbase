@@ -32,7 +32,7 @@ No Auto-Tournament/Ready Up code or runtime is used.
 3. Open http://127.0.0.1:8080 and enter your administrator token.
 4. Choose **Connect machine**, enter a name and its game hostname/IP, and save
    the displayed agent command privately. The agent credential is shown once.
-5. Build the agent with Go 1.24+ (`make build`) and run that command on the Linux
+5. Build the agent with Go 1.25+ (`make build`) and run that command on the Linux
    game machine. Install SteamCMD and required OS libraries first. Use your HTTPS
    API origin for remote machines; loopback HTTP works for local development.
 6. Once the machine is online, choose **Create server**, select a machine and map,
@@ -52,7 +52,7 @@ Use environment variables rather than command-line arguments for credentials.
 
 ## Local development
 
-Requirements: Go 1.24+, Node.js 24+, npm, PostgreSQL 18 (or Compose for the database).
+Requirements: Go 1.25+, Node.js 24+, npm, PostgreSQL 18 (or Compose for the database).
 
 ```bash
 cp .env.example .env
