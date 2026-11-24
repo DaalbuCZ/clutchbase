@@ -1,0 +1,12 @@
+.team-directory-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 20px; margin: 16px 0; }
+.team-directory-tools label { flex: 1 1 260px; max-width: 520px; }
+.team-directory-tools input { width: 100%; }
+.team-directory-tools p { margin: 0 0 10px; }
+.team-directory-list { display: grid; gap: 8px; }
+.team-directory-item { min-width: 0; border: 1px solid #303a32; border-radius: 7px; background: #171b18; }
+.team-directory-item summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 10px 14px; cursor: pointer; }
+.team-directory-item summary:focus-visible { outline: 2px solid #9bcf79; outline-offset: 2px; border-radius: 6px; }
+.team-directory-name { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
+.team-directory-item ul { list-style: none; margin: 0; padding: 0 14px 8px; }
+.team-directory-item li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid #303a32; overflow-wrap: anywhere; }
+@media (max-width: 540px) { .team-directory-tools { align-items: stretch; flex-direction: column; } .team-directory-tools label { max-width: none; } .team-directory-tools p { margin-bottom: 0; } .team-directory-item li { align-items: flex-start; flex-direction: column; gap: 2px; } }

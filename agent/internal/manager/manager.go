@@ -17,21 +17,28 @@ import (
 	"syscall"
 	"time"
 
+	"clutchbase/agent/internal/access"
+	"clutchbase/agent/internal/gamequery"
+	"clutchbase/agent/internal/hostlog"
 	"clutchbase/internal/protocol"
 )
 
 type Manager struct {
 	Root, UnitDir, SteamCMD string
+	PresetPlugin            string
+	Guard                   string
 	agentName               string
 }
 
 // Instance is private on-disk configuration; never return it through the API.
 type Instance struct {
-	Name     string `json:"name"`
-	Port     int    `json:"port"`
-	Map      string `json:"map"`
-	Password string `json:"password"`
-	GSLT     string `json:"gslt,omitempty"`
+	Preset    string   `json:"preset,omitempty"`
+	Name      string   `json:"name"`
+	Port      int      `json:"port"`
+	Map       string   `json:"map"`
+	Password  string   `json:"password"`
+	GSLT      string   `json:"gslt,omitempty"`
+	Whitelist []string `json:"whitelist,omitempty"`
 }
 type Info struct {
 	Name  string `json:"name"`
@@ -66,7 +73,11 @@ func New(root, steamcmd string) (*Manager, error) {
 	if steamcmd == "" {
 		steamcmd = "steamcmd"
 	}
-	return &Manager{Root: root, UnitDir: filepath.Join(config, "systemd", "user"), SteamCMD: steamcmd}, nil
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return &Manager{Root: root, UnitDir: filepath.Join(config, "systemd", "user"), SteamCMD: steamcmd, Guard: filepath.Join(filepath.Dir(executable), "clutchbase-guard"), PresetPlugin: filepath.Join(filepath.Dir(executable), "ClutchbaseAccess")}, nil
 }
 func (m *Manager) Dir(name string) (string, error) {
 	if !namePattern.MatchString(name) {
@@ -128,8 +139,11 @@ func (m *Manager) Load(name string) (Instance, error) {
 	if err = json.Unmarshal(data, &in); err != nil {
 		return in, err
 	}
-	if in.Name != name || in.Port < 1024 || in.Port > 65533 || !protocol.ValidMap(in.Map) || !safeValue(in.Password) || (in.GSLT != "" && !tokenPattern.MatchString(in.GSLT)) {
+	if in.Name != name || in.Port < 1024 || in.Port > 65533 || !protocol.ValidInstalledMap(in.Map) || !protocol.ValidPreset(in.Preset) || !safeValue(in.Password) || (in.GSLT != "" && !tokenPattern.MatchString(in.GSLT)) {
 		return in, errors.New("invalid local instance configuration")
+	}
+	if err := validateWhitelist(in.Whitelist); err != nil {
+		return in, err
 	}
 	return in, nil
 }
@@ -168,11 +182,14 @@ func (m *Manager) Create(in Instance) (Instance, error) {
 	if err != nil {
 		return in, err
 	}
-	if in.Port < 1024 || in.Port > 65533 || !protocol.ValidMap(in.Map) || !safeValue(in.Password) || (in.GSLT != "" && !tokenPattern.MatchString(in.GSLT)) {
+	if in.Port < 1024 || in.Port > 65533 || !protocol.ValidInstalledMap(in.Map) || !protocol.ValidPreset(in.Preset) || !safeValue(in.Password) || (in.GSLT != "" && !tokenPattern.MatchString(in.GSLT)) {
 		return in, errors.New("use an official map, a port from 1024 to 65533, a safe password and an optional 32-character hex GSLT")
 	}
 	if in.Password == "" {
 		in.Password = rand.Text()
+	}
+	if len(in.Whitelist) != 0 || in.Preset != "" {
+		return in, errors.New("configure the whitelist after installing the instance and plugins")
 	}
 	if err := m.checkUnit(in.Name); err != nil {
 		return in, err
@@ -257,7 +274,8 @@ func gameFilesPresent(serverDir string) bool {
 }
 func (m *Manager) Status(ctx context.Context, name string) protocol.Report {
 	report := protocol.Report{Driver: "managed", State: "error"}
-	if _, err := m.Load(name); err != nil {
+	in, err := m.Load(name)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			report.State = "uninstalled"
 		} else {
@@ -265,6 +283,7 @@ func (m *Manager) Status(ctx context.Context, name string) protocol.Report {
 		}
 		return report
 	}
+	report.JoinPassword = in.Password
 	dir, _ := m.Dir(name)
 	unlock, err := lock(filepath.Join(dir, "operation.lock"))
 	if errors.Is(err, ErrBusy) {
@@ -282,16 +301,111 @@ func (m *Manager) Status(ctx context.Context, name string) protocol.Report {
 		report.State = "uninstalled"
 		return report
 	}
+	report.ReporterSourceHash, report.ReporterInstalledHash = m.reporterHashes(name)
 	state, err := serviceState(ctx, unit(name))
 	if err != nil {
 		report.Error = err.Error()
 		return report
 	}
 	report.State = state
-	if state == "error" {
+	report.AccessStatus = "password"
+	if len(in.Whitelist) != 0 {
+		report.AccessStatus = "pending"
+		if access.Failure(m.accessDir(in.Name)) || state == "error" {
+			report.AccessStatus = "blocked"
+			report.State = "error"
+			report.Error = "Runtime whitelist verification failed; stop the instance before retrying"
+		} else if state == "running" {
+			var request access.Request
+			report.State = "starting"
+			if access.Read(filepath.Join(m.accessDir(in.Name), "request.json"), &request) == nil && request.RosterHash == access.Hash([]byte(strings.Join(in.Whitelist, "\n")+"\n")) {
+				if evidence, err := access.Verified(m.accessDir(in.Name), request, time.Now()); err == nil {
+					report.AccessStatus = "verified"
+					report.State = "running"
+					if protocol.ValidPreset(evidence.Mode) {
+						report.ActivePreset = evidence.Mode
+					}
+					report.CanLiveMode = evidence.CanSwitchMode
+					report.CanLoadMatch = evidence.CanLoadMatch
+					// A capability bit from a reporter is meaningful only when its
+					// current MatchZy runtime is recognized and match setup is usable.
+					report.SupportsManualReady = evidence.SupportsManualReady && evidence.CanLoadMatch
+					report.SupportsMatchSeries = evidence.SupportsMatchSeries && evidence.CanLoadMatch
+					report.SupportsFencedMatchControl = evidence.SupportsFencedMatchControl
+					report.MatchPhase = evidence.MatchPhase
+					if evidence.LiveScore.Valid() && evidence.LiveScore.ObservedAt == evidence.ReportedAt {
+						report.LiveScore = evidence.LiveScore
+					}
+					report.ActiveMatchSetupID = evidence.ActiveMatchSetupID
+					report.SupportsMatchFence = evidence.SupportsMatchFence
+					report.CanPauseMatch = evidence.CanPauseMatch
+					report.CanResumeMatch = evidence.CanResumeMatch
+					if evidence.ModeCommandStatus == "complete" || evidence.ModeCommandStatus == "failed" {
+						report.ModeCommandID = evidence.ModeCommandID
+						report.ModeCommandStatus = evidence.ModeCommandStatus
+						report.ModeCommandError = evidence.ModeCommandError
+					}
+					if evidence.MatchSetupStatus == "complete" || evidence.MatchSetupStatus == "failed" {
+						report.MatchSetupID = evidence.MatchSetupID
+						report.MatchSetupStatus = evidence.MatchSetupStatus
+						report.MatchSetupError = evidence.MatchSetupError
+					}
+					if evidence.MatchControlStatus == "complete" || evidence.MatchControlStatus == "failed" {
+						report.MatchControlID = evidence.MatchControlID
+						report.MatchControlAction = evidence.MatchControlAction
+						report.MatchControlStatus = evidence.MatchControlStatus
+						report.MatchControlError = evidence.MatchControlError
+					}
+					if evidence.MatchCancelStatus == "complete" || evidence.MatchCancelStatus == "failed" {
+						report.MatchCancelID = evidence.MatchCancelID
+						report.MatchCancelSetupID = evidence.MatchCancelSetupID
+						report.MatchCancelStatus = evidence.MatchCancelStatus
+						report.MatchCancelError = evidence.MatchCancelError
+					}
+				}
+			}
+		}
+	}
+	if report.State == "running" {
+		// An active service does not prove CS2 accepts players; the game query
+		// does. Until it answers, the instance keeps the starting projection.
+		info, err := gamequery.Query(ctx, in.Port)
+		if err != nil {
+			report.State = "starting"
+		} else {
+			report.Players, report.MaxPlayers = &info.Players, &info.MaxPlayers
+			if protocol.ValidInstalledMap(info.Map) {
+				report.ActiveMap = info.Map
+			}
+		}
+	}
+	if report.LiveScore != nil && (report.State != "running" || report.AccessStatus != "verified" || report.ActivePreset != "match" || report.LiveScore.SetupID != report.ActiveMatchSetupID || report.LiveScore.Map != report.ActiveMap || (report.MatchPhase != "live" && report.MatchPhase != "paused")) {
+		report.LiveScore = nil
+	}
+	if state == "error" && report.Error == "" {
 		report.Error = "Service failed; inspect journalctl --user -u " + unit(name)
 	}
 	return report
+}
+
+// LogTail returns a redacted, capped tail of the instance's service journal and
+// install log for dashboard display. Missing sources are simply omitted.
+func (m *Manager) LogTail(name string) string {
+	dir, err := m.Dir(name)
+	if err != nil {
+		return ""
+	}
+	const separator = "\n--- install.log ---\n"
+	journal := hostlog.Journal(unit(name), 30, 2048)
+	install := hostlog.TailFile(filepath.Join(dir, "install.log"), 2048-int64(len(separator)))
+	switch {
+	case journal == "":
+		return install
+	case install == "":
+		return journal
+	default:
+		return journal + separator + install
+	}
 }
 func serviceState(ctx context.Context, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -426,8 +540,19 @@ func (m *Manager) Install(ctx context.Context, name string, update bool) error {
 	return atomicWrite(filepath.Join(dir, "installed"), []byte(time.Now().UTC().Format(time.RFC3339)+"\n"))
 }
 func (m *Manager) writeConfig(in Instance, mapName string) error {
-	if !protocol.ValidMap(mapName) {
+	if err := m.CheckInstalledMap(in.Name, mapName); err != nil {
+		return err
+	}
+	if !protocol.ValidInstalledMap(mapName) {
 		return errors.New("unsupported map")
+	}
+	if in.Preset != "" {
+		if err := m.checkPresetReporter(in.Name); err != nil {
+			return err
+		}
+	}
+	if err := m.writeWhitelist(in); err != nil {
+		return err
 	}
 	dir, _ := m.Dir(in.Name)
 	cfgDir := filepath.Join(dir, "server", "game", "csgo", "cfg")
@@ -477,7 +602,16 @@ func (m *Manager) writeUnit(in Instance) error {
 		return err
 	}
 	// WorkingDirectory is a raw path; unlike ExecStart it does not unquote words.
-	data := marker + "[Unit]\nDescription=Clutchbase CS2 " + in.Name + "\nAfter=network-online.target\n\n[Service]\nType=exec\nWorkingDirectory=" + strings.ReplaceAll(serverDir, "%", "%%") + "\nExecStart=" + unitQuote(strings.ReplaceAll(filepath.Join(serverDir, "game", "cs2.sh"), "$", "$$")) + " -dedicated -console -usercon -strictportbind -port " + strconv.Itoa(in.Port) + " -clientport " + strconv.Itoa(in.Port+1) + " +game_type 0 +game_mode 1 +exec clutchbase.cfg\nKillSignal=SIGINT\nTimeoutStopSec=20\nRestart=no\n\n[Install]\nWantedBy=default.target\n"
+	launch := unitQuote(strings.ReplaceAll(filepath.Join(serverDir, "game", "cs2.sh"), "$", "$$"))
+	if len(in.Whitelist) != 0 {
+		guard := filepath.Join(dir, "guard")
+		info, err := os.Stat(guard)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+			return errors.New("install clutchbase-guard beside the host and agent binaries, then reconfigure the whitelist")
+		}
+		launch = unitQuote(strings.ReplaceAll(guard, "$", "$$")) + " --access-dir " + unitQuote(strings.ReplaceAll(m.accessDir(in.Name), "$", "$$")) + " -- " + launch
+	}
+	data := marker + "[Unit]\nDescription=Clutchbase CS2 " + in.Name + "\nAfter=network-online.target\n\n[Service]\nType=exec\nWorkingDirectory=" + strings.ReplaceAll(serverDir, "%", "%%") + "\nExecStart=" + launch + " -dedicated -console -usercon -strictportbind -port " + strconv.Itoa(in.Port) + " -clientport " + strconv.Itoa(in.Port+1) + " +game_type 0 +game_mode 1 +exec clutchbase.cfg\nKillSignal=SIGINT\nTimeoutStopSec=20\nRestart=no\n\n[Install]\nWantedBy=default.target\n"
 	return atomicWrite(path, []byte(data))
 }
 func (m *Manager) Start(ctx context.Context, name, mapName string) error {
@@ -499,6 +633,9 @@ func (m *Manager) Start(ctx context.Context, name, mapName string) error {
 	if !m.installed(name) {
 		return errors.New("install the instance before starting it")
 	}
+	if len(in.Whitelist) != 0 && access.Failure(m.accessDir(name)) {
+		return errors.New("runtime whitelist verification failed; stop the instance before retrying")
+	}
 	state, err := serviceState(ctx, unit(name))
 	if err != nil {
 		return err
@@ -510,6 +647,12 @@ func (m *Manager) Start(ctx context.Context, name, mapName string) error {
 		return errors.New("wait for the instance to stop")
 	}
 	if err = m.writeConfig(in, mapName); err != nil {
+		return err
+	}
+	if err = m.writeUnit(in); err != nil {
+		return err
+	}
+	if err = systemctl(ctx, "daemon-reload"); err != nil {
 		return err
 	}
 	in.Map = mapName
@@ -540,7 +683,25 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	if !m.installed(name) {
 		return nil
 	}
-	return systemctl(ctx, "stop", unit(name))
+	state, err := serviceState(ctx, unit(name))
+	if err != nil {
+		return err
+	}
+	if state != "stopped" {
+		if err := systemctl(ctx, "stop", unit(name)); err != nil {
+			return err
+		}
+	}
+	// Inactive units may unload before reset-failed; only failed units need it.
+	if state == "error" {
+		if err := systemctl(ctx, "reset-failed", unit(name)); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(filepath.Join(m.accessDir(name), "failure.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 func (m *Manager) List(ctx context.Context) ([]Info, error) {
 	entries, err := os.ReadDir(filepath.Join(m.Root, "instances"))

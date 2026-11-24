@@ -1,0 +1,7 @@
+.fixture-list { display: grid; gap: 8px; }
+.fixture-list .fixture-list-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; padding: 15px 16px; background: #171e19; border: 1px solid #354037; border-radius: 8px; text-align: left; color: #edf0e9; }
+.fixture-list .fixture-list-row:hover { border-color: #6a8655; }
+.fixture-list-row > span { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.fixture-list-row small { color: #aeb6a7; }
+.fixture-list-row time { color: #c9d5bf; font-size: 12px; white-space: nowrap; }
+@media (max-width: 560px) { .fixture-list .fixture-list-row { align-items: flex-start; flex-direction: column; gap: 8px; } }

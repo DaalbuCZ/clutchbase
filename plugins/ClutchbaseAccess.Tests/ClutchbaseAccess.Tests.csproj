@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ClutchbaseAccess/MapPolicy.cs" Link="MapPolicy.cs" />
+    <Compile Include="../ClutchbaseAccess/RuntimeEvidence.cs" Link="RuntimeEvidence.cs" />
+    <Compile Include="../ClutchbaseAccess/MatchFence.cs" Link="MatchFence.cs" />
+    <Compile Include="../ClutchbaseAccess/MatchControlFence.cs" Link="MatchControlFence.cs" />
+    <Compile Include="../ClutchbaseAccess/MatchConfigBuilder.cs" Link="MatchConfigBuilder.cs" />
+    <Compile Include="../ClutchbaseAccess/FinishedResult.cs" Link="FinishedResult.cs" />
+  </ItemGroup>
+</Project>

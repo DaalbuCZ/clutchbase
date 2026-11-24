@@ -1,0 +1,15 @@
+.admin-fleet { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.admin-fleet .admin-fleet-card { display: grid; align-content: start; gap: 10px; width: 100%; min-width: 0; padding: 18px; text-align: left; color: #edf0e9; background: #171e19; border: 1px solid #354037; border-radius: 8px; }
+.admin-fleet .admin-fleet-card:hover, .admin-fleet .admin-fleet-card:focus-visible { border-color: #91b574; background: #1d291e; }
+.admin-fleet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.admin-fleet-head strong { font-size: 16px; overflow-wrap: anywhere; }
+.admin-fleet-meta, .admin-fleet-resources { color: #aeb6a7; font-size: 12px; overflow-wrap: anywhere; }
+.admin-fleet-facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; }
+.admin-fleet-attention { padding: 9px 10px; border-left: 3px solid #e6b76b; background: #332b1c; color: #f0cb8a; font-size: 12px; }
+.admin-fleet-maintenance { color: #c4d9b6; font-size: 12px; }
+.admin-fleet-open { color: #b4d39b; font-size: 12px; font-weight: 600; }
+.admin-match-details { margin-top: 14px; border: 1px solid #354037; border-radius: 8px; }
+.admin-match-details > summary { padding: 12px 14px; cursor: pointer; color: #dce8d5; font-weight: 600; }
+.admin-match-details > div { padding: 0 14px 14px; }
+.admin-match-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.admin-match-actions .server-footer { margin: 0; padding: 0; border: 0; }

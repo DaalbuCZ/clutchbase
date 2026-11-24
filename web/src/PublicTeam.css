@@ -1,0 +1,10 @@
+.public-team { max-width: 900px; }
+.team-members { list-style: none; margin: 16px 0 0; padding: 0; }
+.team-members li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 0; border-top: 1px solid #303a32; }
+.team-members li > div:first-child { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.team-members .heading-actions { flex-wrap: wrap; }
+.team-lock, .team-confirmation { padding: 15px; border: 1px solid #655631; background: #211e15; border-radius: 7px; }
+.team-confirmation { margin-top: 18px; }
+.team-confirmation p { line-height: 1.6; }
+.team-invite { overflow-wrap: anywhere; margin: 14px 0 0; }
+@media (max-width:600px) { .team-members li { align-items: start; flex-direction: column; } }

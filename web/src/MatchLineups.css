@@ -1,0 +1,21 @@
+.match-lineups .match-capacity {
+  height: 5px;
+  overflow: hidden;
+  margin: -2px 0 10px;
+  border-radius: 999px;
+  background: #252d28;
+}
+
+.match-lineups .match-capacity > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 180ms ease;
+}
+
+.match-lineups .match-capacity-ct > span { background: #77b9e7; }
+.match-lineups .match-capacity-t > span { background: #e5aa67; }
+
+@media (prefers-reduced-motion: reduce) {
+  .match-lineups .match-capacity > span { transition: none; }
+}

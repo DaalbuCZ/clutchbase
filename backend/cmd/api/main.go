@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -37,7 +38,11 @@ func run() error {
 	defer db.Close()
 	startup, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	api := &control.API{DB: db, AdminToken: token}
+	origin := os.Getenv("CLUTCHBASE_ORIGIN")
+	if origin == "" {
+		origin = "http://127.0.0.1:8080"
+	}
+	api := &control.API{DB: db, AdminToken: token, Origin: origin, Context: ctx}
 	if err := api.Migrate(startup); err != nil {
 		return errors.New("database setup failed; check DATABASE_URL and PostgreSQL availability")
 	}
@@ -69,6 +74,10 @@ func appHandler(api http.Handler, dir string) http.Handler {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				w.Header().Set("Allow", "GET, HEAD")
 				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if r.URL.Path == "/play" || r.URL.Path == "/manage" {
+				http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 				return
 			}
 			files.ServeHTTP(w, r)

@@ -1,0 +1,45 @@
+.history-search { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 16px 0; }
+.history-search label { display: grid; gap: 6px; flex: 1 1 240px; max-width: 540px; }
+.history-search input { width: 100%; }
+.history-snapshot { overflow-wrap: anywhere; }
+.history-cards { display: grid; gap: 10px; margin: 16px 0; }
+.history-card { padding: 14px 16px; background: #171e19; border: 1px solid #354037; border-radius: 9px; min-width: 0; }
+.history-card-heading { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.history-card-heading h3 { font-size: 16px; margin: 0 0 4px; overflow-wrap: anywhere; }
+.history-card-heading p { margin: 0; overflow-wrap: anywhere; }
+.history-card-heading .state-pill { flex-shrink: 0; }
+.history-card details { border-top: 1px solid #303a32; margin-top: 10px; }
+.history-card summary { cursor: pointer; padding: 10px 0 0; font-size: 14px; font-weight: 600; }
+.history-card summary::marker { color: #9ead9f; }
+.history-card summary:focus-visible { outline: 2px solid #75c28a; outline-offset: 4px; border-radius: 2px; }
+.history-card details[open] > summary { margin-bottom: 12px; }
+.history-series-heading p { margin: 0 0 12px; }
+.history-series-maps { display: grid; gap: 8px; }
+.history-series-map { padding: 10px; border: 1px solid #354037; border-radius: 6px; background: #141a16; }
+.history-series-map-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; overflow-wrap: anywhere; }
+.history-series-score { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 6px 0 2px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.history-series-map .text-button { margin-top: 5px; padding-left: 0; }
+.history-series-map-form { max-width: 420px; margin-top: 12px; }
+.history-series-map-form label, .history-result form label { display: grid; gap: 5px; margin: 8px 0; }
+.history-series-result { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin-top: 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.history-series-result span { font-weight: 600; }
+.history-scoreboard { overflow-x: auto; }
+.history-scoreboard table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.history-scoreboard caption { text-align: left; padding: 0 0 8px; font-weight: 600; }
+.history-scoreboard th, .history-scoreboard td { text-align: left; padding: 8px; border-bottom: 1px solid #303a32; vertical-align: top; }
+.history-scoreboard thead { color: #9ead9f; white-space: nowrap; }
+.history-scoreboard tbody th { min-width: 150px; font-weight: 500; overflow-wrap: anywhere; }
+.history-scoreboard td { font-variant-numeric: tabular-nums; }
+.history-scoreboard .small { font-size: 13px; color: #dce5da; }
+.history-scoreboard form { width: 220px; white-space: normal; margin: 12px 0; }
+.history-scoreboard .text-button { display: block; padding-left: 0; }
+.history-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.history-result > p { margin: 0; font-size: 14px; font-weight: 600; }
+.history-result > span:empty { display: none; }
+.history-result > button { margin-left: auto; }
+.history-result form { flex: 1 0 100%; max-width: 420px; margin-top: 8px; }
+@media(max-width:600px) {
+  .history-card { padding: 12px; }
+  .history-card-heading { flex-wrap: wrap; }
+  .history-result > button { margin-left: 0; }
+}

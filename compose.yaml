@@ -21,6 +21,7 @@ services:
       CLUTCHBASE_ADMIN_TOKEN: ${CLUTCHBASE_ADMIN_TOKEN:?Set CLUTCHBASE_ADMIN_TOKEN in .env}
       CLUTCHBASE_LISTEN: :8080
       CLUTCHBASE_WEB_DIR: /app/web
+      CLUTCHBASE_ORIGIN: ${CLUTCHBASE_ORIGIN:-http://127.0.0.1:8080}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

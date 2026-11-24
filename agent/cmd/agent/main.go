@@ -80,10 +80,12 @@ func run() error {
 		defer ticker.Stop()
 		for {
 			var desired protocol.MachineDesired
-			err := exchange(ctx, client, base+"/api/machine-agent/"+url.PathEscape(id)+"/heartbeat", token, fleet.Report(ctx), &desired, 131072)
+			err := exchange(ctx, client, base+"/api/machine-agent/"+url.PathEscape(id)+"/heartbeat", token, fleet.Report(ctx), &desired, 524288)
 			if err != nil {
+				fleet.ConnectionFailed()
 				log.Printf("Machine heartbeat failed: %v", err)
 			} else if err = fleet.Apply(ctx, desired); err != nil {
+				fleet.ConnectionFailed()
 				log.Printf("Machine reconciliation failed: %v", err)
 			}
 			select {
@@ -157,7 +159,7 @@ func run() error {
 }
 func heartbeat(ctx context.Context, client *http.Client, endpoint, token string, report protocol.Report) (protocol.Desired, error) {
 	var desired protocol.Desired
-	err := exchange(ctx, client, endpoint, token, report, &desired, 8192)
+	err := exchange(ctx, client, endpoint, token, report, &desired, 16384)
 	return desired, err
 }
 func exchange(ctx context.Context, client *http.Client, endpoint, token string, report any, desired any, limit int64) error {

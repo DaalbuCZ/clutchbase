@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"clutchbase/agent/internal/gamequery"
+	"clutchbase/agent/internal/hostlog"
 	"clutchbase/internal/protocol"
 )
 
@@ -19,6 +21,7 @@ type Runner struct {
 	Simulate   bool
 	Unit       string
 	ConfigPath string
+	Port       int
 	state      string
 	activeMap  string
 }
@@ -43,10 +46,20 @@ func (r *Runner) Status(ctx context.Context) protocol.Report {
 		return protocol.Report{State: state, ActiveMap: r.activeMap, Driver: "simulated"}
 	}
 	state, err := r.systemctl(ctx, "is-active", r.Unit)
-	report := protocol.Report{State: "error", Driver: "systemd", ActiveMap: r.activeMap}
+	report := protocol.Report{State: "error", Driver: "systemd"}
 	switch state {
 	case "active":
 		report.State = "running"
+		// An active service does not prove CS2 accepts players; the game query
+		// does. Until it answers, the instance keeps the starting projection.
+		if info, err := gamequery.Query(ctx, r.Port); err != nil {
+			report.State = "starting"
+		} else {
+			report.Players, report.MaxPlayers = &info.Players, &info.MaxPlayers
+			if protocol.ValidMap(info.Map) {
+				report.ActiveMap = info.Map
+			}
+		}
 	case "inactive":
 		report.State = "stopped"
 	case "activating":
@@ -63,12 +76,26 @@ func (r *Runner) Status(ctx context.Context) protocol.Report {
 	if report.State != "running" {
 		report.ActiveMap = ""
 	}
+	report.LogTail = hostlog.Journal(r.Unit, 30, 4096)
 	return report
 }
 func (r *Runner) Apply(ctx context.Context, desired protocol.Desired) error {
+	if desired.ReporterUpdate != nil {
+		return errors.New("simulation cannot update a reporter")
+	}
+	if desired.MatchCancel != nil {
+		return errors.New("simulation cannot cancel a match setup")
+	}
+	if desired.LiveMode != nil {
+		return errors.New("simulation cannot switch a running game mode")
+	}
+	if desired.MatchControl != nil {
+		return errors.New("simulation cannot control a live match")
+	}
 	if !protocol.ValidMap(desired.Map) || (desired.State != "running" && desired.State != "stopped") {
 		return errors.New("backend returned an unsupported state or map")
 	}
+	r.Port = desired.Port
 	if r.Simulate {
 		r.state = desired.State
 		r.activeMap = desired.Map

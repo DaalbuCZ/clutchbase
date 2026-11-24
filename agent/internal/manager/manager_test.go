@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,8 @@ case " $* " in
   *" is-active "*)
     if [ -f "$CB_TEST_STATE/$last" ]; then cat "$CB_TEST_STATE/$last"; else echo inactive; fi ;;
   *" start "*) echo active > "$CB_TEST_STATE/$last" ;;
-  *" stop "*) echo inactive > "$CB_TEST_STATE/$last" ;;
+  *" stop "*) if [ "$(cat "$CB_TEST_STATE/$last" 2>/dev/null)" != failed ]; then echo inactive > "$CB_TEST_STATE/$last"; fi ;;
+  *" reset-failed "*) if [ "$(cat "$CB_TEST_STATE/$last" 2>/dev/null)" = failed ]; then echo inactive > "$CB_TEST_STATE/$last"; fi ;;
 esac
 `,
 		"steamcmd": `#!/bin/sh
@@ -46,6 +48,11 @@ if [ "$CB_TEST_PARTIAL" = 1 ]; then exit 0; fi
 mkdir -p "$2/game/bin/linuxsteamrt64"
 cp "$2/game/cs2.sh" "$2/game/bin/linuxsteamrt64/cs2"
 `,
+		"journalctl": `#!/bin/sh
+echo "CS2 loading map"
+echo 'sv_password "hunter2"'
+echo 'sv_setsteamaccount "gslt-token-123"'
+`,
 	}
 	for name, script := range scripts {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0700); err != nil {
@@ -53,6 +60,33 @@ cp "$2/game/cs2.sh" "$2/game/bin/linuxsteamrt64/cs2"
 		}
 	}
 	return &Manager{Root: filepath.Join(dir, "data with spaces%"), UnitDir: filepath.Join(dir, "units"), SteamCMD: filepath.Join(bin, "steamcmd")}
+}
+
+// serveA2S answers loopback game queries with a ready-server reply until the
+// test ends, standing in for CS2 accepting queries on the instance port.
+func serveA2S(t *testing.T, port int, players, max byte) {
+	t.Helper()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, from, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if n < 5 {
+				continue
+			}
+			reply := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0x49, 24}
+			reply = append(reply, "clutchbase\x00de_mirage\x00csgo\x00CS2\x00"...)
+			reply = append(reply, 0, 0, players, max, 0, 'd', 'l', 0, 0)
+			conn.WriteToUDP(reply, from)
+		}
+	}()
 }
 func create(t *testing.T, m *Manager, name string, port int) Instance {
 	t.Helper()
@@ -67,6 +101,9 @@ func TestCreateIsolationAndSecrets(t *testing.T) {
 	in := create(t, m, "friends", 27015)
 	if len(in.Password) < 26 {
 		t.Fatal("missing random join password")
+	}
+	if got := m.Status(context.Background(), in.Name).JoinPassword; got != in.Password {
+		t.Fatal("managed status did not report the host-local join password")
 	}
 	for _, bad := range []Instance{{Name: "../escape", Port: 27025, Map: "de_mirage"}, {Name: "bad", Port: 65535, Map: "de_mirage"}, {Name: "bad", Port: 27025, Map: "de_mirage;quit"}, {Name: "bad", Port: 27025, Map: "de_mirage", Password: "x\nquit"}, {Name: "bad", Port: 27025, Map: "de_mirage", GSLT: "invalid"}, {Name: "overlap", Port: 27017, Map: "de_mirage"}, {Name: "reused-token", Port: 27025, Map: "de_mirage", GSLT: in.GSLT}} {
 		if _, err := m.Create(bad); err == nil {
@@ -146,8 +183,10 @@ func TestInstallStartStopAndUpdate(t *testing.T) {
 	if err := m.Start(ctx, "friends", "de_nuke"); err != nil {
 		t.Fatal(err)
 	}
-	if m.Status(ctx, "friends").State != "running" {
-		t.Fatal("instance did not start")
+	serveA2S(t, 27015, 3, 12)
+	status := m.Status(ctx, "friends")
+	if status.State != "running" || status.Players == nil || *status.Players != 3 || status.MaxPlayers == nil || *status.MaxPlayers != 12 {
+		t.Fatalf("a game-querying instance did not report readiness: %+v", status)
 	}
 	if err := m.Install(ctx, "friends", true); err == nil {
 		t.Fatal("updated active instance")
@@ -173,6 +212,48 @@ func TestInstallStartStopAndUpdate(t *testing.T) {
 		t.Fatal("managed startup map was not persisted")
 	}
 }
+
+// An active service without a game query answer must keep the starting
+// projection; counts appear only once the loopback query is answered.
+func TestStatusRequiresGameQueryAnswer(t *testing.T) {
+	m := fixture(t)
+	create(t, m, "friends", 27015)
+	ctx := context.Background()
+	if err := m.Install(ctx, "friends", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx, "friends", "de_mirage"); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Status(ctx, "friends"); got.State != "starting" {
+		t.Fatalf("an active service without query answer must not be running: %+v", got)
+	}
+	serveA2S(t, 27015, 0, 12)
+	if got := m.Status(ctx, "friends"); got.State != "running" || got.Players == nil || *got.Players != 0 || got.MaxPlayers == nil || *got.MaxPlayers != 12 {
+		t.Fatalf("game query did not prove readiness: %+v", got)
+	}
+}
+
+func TestLogTailRedactsSecrets(t *testing.T) {
+	m := fixture(t)
+	create(t, m, "friends", 27015)
+	dir, _ := m.Dir("friends")
+	if err := os.WriteFile(filepath.Join(dir, "install.log"), []byte("Update state (0x61) downloading\nsv_password \"hunter2\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tail := m.LogTail("friends")
+	for _, secret := range []string{"hunter2", "gslt"} {
+		if strings.Contains(tail, secret) {
+			t.Fatalf("log tail leaked %q: %q", secret, tail)
+		}
+	}
+	for _, wanted := range []string{"CS2 loading map", "Update state (0x61) downloading", "[redacted]", "--- install.log ---"} {
+		if !strings.Contains(tail, wanted) {
+			t.Fatalf("log tail is missing %q: %q", wanted, tail)
+		}
+	}
+}
+
 func TestFailedAndCancelledInstallIsNotReady(t *testing.T) {
 	m := fixture(t)
 	create(t, m, "friends", 27015)
@@ -289,4 +370,61 @@ func TestInvalidSystemdUnitIsNotReady(t *testing.T) {
 	if m.installed("friends") {
 		t.Fatal("invalid unit received an installed marker")
 	}
+}
+
+func TestStopNeverStartedInstanceIsIdempotent(t *testing.T) {
+	m := fixture(t)
+	ctx := context.Background()
+	create(t, m, "friends", 27015)
+	if err := m.Install(ctx, "friends", false); err != nil {
+		t.Fatal(err)
+	}
+	// Real systemd can unload an inactive unit before reset-failed reaches it.
+	script := `#!/bin/sh
+case " $* " in
+ *" is-active "*) echo inactive ;;
+ *" stop "*|*" reset-failed "*) exit 1 ;;
+ *) exit 0 ;;
+esac
+`
+	path := filepath.Join(filepath.Dir(m.SteamCMD), "systemctl")
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(m.accessDir("friends"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	failure := filepath.Join(m.accessDir("friends"), "failure.json")
+	if err := os.WriteFile(failure, []byte("failed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := m.Stop(ctx, "friends"); err != nil {
+			t.Fatal("stopped instance failed reconciliation", err)
+		}
+	}
+	if _, err := os.Stat(failure); !os.IsNotExist(err) {
+		t.Fatal("inactive Stop retained watchdog latch")
+	}
+}
+
+func TestCombinedLogTailFitsHeartbeatLimit(t *testing.T) {
+	m := fixture(t)
+	create(t, m, "friends", 27015)
+	dir, _ := m.Dir("friends")
+	if err := os.WriteFile(filepath.Join(dir, "install.log"), []byte(strings.Repeat("i\n", 1024)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf '%s' '" + strings.Repeat("j", 2048) + "'\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(m.SteamCMD), "journalctl"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tail := m.LogTail("friends")
+	if len(tail) > 4096 {
+		t.Fatalf("combined logs exceed API limit: %d", len(tail))
+	}
+	if !strings.Contains(tail, "--- install.log ---") || !strings.Contains(tail, "j") || !strings.Contains(tail, "i\ni") {
+		t.Fatal("lost journal or separator")
+	}
+
 }

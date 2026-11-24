@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    env_file: /home/byttorrent/.local/share/clutchbase-stack/postgres.env
+    volumes:
+      - clutchbase_postgres:/var/lib/postgresql
+      - /home/byttorrent/.local/share/clutchbase-stack/clutchbase-restore.sql:/docker-entrypoint-initdb.d/10-restore.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  app:
+    build:
+      context: /home/byttorrent/.local/share/clutchbase-stack/source
+    restart: unless-stopped
+    env_file: /home/byttorrent/.local/share/clutchbase-stack/app.env
+    ports:
+      - "8888:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  clutchbase_postgres:

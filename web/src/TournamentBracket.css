@@ -1,0 +1,23 @@
+/* Bracket layout and navigation; match content remains supplied by each caller. */
+.tournament-bracket { align-items: start; gap: 16px; padding: 8px 4px 16px; scroll-padding-inline: 12px; scrollbar-color: #53624f #151a16; }
+.tournament-bracket:focus-visible { outline: 2px solid #9ccc7a; outline-offset: 3px; }
+.bracket-round { flex-basis: clamp(240px, 27vw, 300px); scroll-margin: 14px; }
+.bracket-round > h3 { position: sticky; top: 0; z-index: 1; padding: 9px 10px; border: 1px solid #354037; border-radius: 7px; background: #171e18; }
+.bracket-round.is-current-round > h3 { border-color: #718a59; color: #e2f2d8; box-shadow: inset 3px 0 #9ccc7a; }
+.bracket-round-matches { gap: 12px; }
+.bracket-match { min-width: 0; overflow-wrap: anywhere; }
+.bracket-match button, .bracket-match select, .bracket-match a { min-height: 36px; }
+.bracket-round-nav { position: sticky; left: 0; z-index: 2; display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 6px; border: 1px solid #354037; border-radius: 8px; background: #151b16; }
+.bracket-round-nav > span { padding: 0 4px; white-space: nowrap; }
+.bracket-round-nav button { display: grid; min-width: 36px; min-height: 36px; place-items: center; border: 1px solid #3b463c; border-radius: 6px; color: #d4ddd4; background: #202820; font-size: 12px; }
+.bracket-round-nav button:hover, .bracket-round-nav button[aria-current="location"] { border-color: #8da96f; background: #303e2a; color: #f0f7eb; }
+.bracket-round-nav button:focus-visible { outline: 2px solid #b5e494; outline-offset: 2px; }
+@media (max-width: 700px) {
+  .tournament-bracket { gap: 12px; }
+  .bracket-round { flex-basis: min(280px, calc(100vw - 64px)); }
+  .bracket-round-nav { max-width: calc(100vw - 56px); overflow-x: auto; }
+  .bracket-round-nav > span { position: sticky; left: 0; background: #151b16; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tournament-bracket { scroll-behavior: smooth; }
+}

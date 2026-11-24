@@ -5,3 +5,6 @@ bin/
 *.log
 coverage.out
 *.tsbuildinfo
+plugins/**/bin/
+plugins/**/obj/
+.prototype/

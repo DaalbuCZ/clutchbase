@@ -1,0 +1,13 @@
+.statistics { display: grid; gap: 16px; }
+.statistics h2 { margin: 0; }
+.stats-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 10px; }
+.stats-summary article { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line,#333); border-radius: 10px; }
+.stats-summary span { color: var(--muted,#999); font-size: .9rem; }
+.stats-summary strong { font-size: 1.5rem; }
+.stats-table-wrap { overflow-x: auto; }
+.stats-table-wrap table { width: 100%; border-collapse: collapse; }
+.stats-table-wrap th,.stats-table-wrap td { padding: 10px; text-align: left; border-bottom: 1px solid var(--line,#333); white-space: nowrap; }
+.stats-connection { margin: 0; }
+.stats-maps { margin-top: 18px; border-top: 1px solid #354037; padding-top: 14px; }
+.stats-maps summary { cursor: pointer; color: #e3eadb; font-weight: 600; }
+.stats-maps .stats-table-wrap { margin-top: 12px; }
